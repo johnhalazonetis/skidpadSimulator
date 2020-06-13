@@ -1,0 +1,237 @@
+\documentclass[a4paper, 11pt]{article}
+\usepackage[margin=1in]{geometry} 
+\usepackage[utf8] {inputenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{graphicx,subfigure}
+\usepackage{textcomp}
+\usepackage{comment}
+\usepackage{newunicodechar}
+\usepackage{epstopdf}
+\usepackage{caption}
+\usepackage{lipsum}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{cellspace}
+\usepackage{color}
+\usepackage{textcomp}
+\usepackage[hidelinks]{hyperref}
+\usepackage{multirow}
+\usepackage{siunitx}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{changepage}
+\usepackage{titlesec}
+\usepackage{pdfpages}
+\usepackage{datetime}
+\usepackage[autostyle]{csquotes}
+\usepackage[usenames]{xcolor}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\setlength{\parindent}{0pt}
+\usepackage{fontspec}
+\defaultfontfeatures{Mapping=tex-text,Scale=MatchLowercase}
+\setmainfont{Helvetica}
+
+\let\svthefootnote\thefootnote
+
+\rhead{\includegraphics[height = 0.75cm]{Figures/AMZLogoRawRed.eps}}
+\lhead{\LARGE{LQR Optimization}}
+
+\titleformat{\section}
+  {\normalfont\fontsize{18}{15}\bfseries}{\thesection}{1em}{}
+
+\appto\normalsize{\belowdisplayshortskip=\belowdisplayskip}
+\appto\small{\belowdisplayshortskip=\belowdisplayskip}
+\appto\footnotesize{\belowdisplayshortskip=\belowdisplayskip}
+
+\makeatletter
+\renewcommand*\env@matrix[1][\arraystretch]{%
+  \edef\arraystretch{#1}%
+  \hskip -\arraycolsep
+  \let\@ifnextchar\new@ifnextchar
+  \array{*\c@MaxMatrixCols c}}
+  \makeatother
+  
+\begin{document}
+
+\section{Finding Jacobian Matrices}
+
+One of the calculations in our code that optimises our LQR gain matrices is to calculate the Jacobian matrices of our system. Let us start by stating our states :
+\begin{align*}
+	x &= \left\{ \begin{matrix}
+		w\\ \mu \\ v_x\\ v_y\\ r
+	\end{matrix} \right. & \dot{x} &= \left\{\begin{matrix}[1.5]
+		\dot{w} = v_x\cdot\sin\left(\mu \right) + v_y\cdot \cos\left(\mu \right)\\
+		\dot{\mu} = r - \frac{\kappa\left(v_x\cdot\cos\left(\mu \right) - v_y\cdot \sin\left(\mu \right) \right)}{1-\kappa\cdot w} \\
+		\dot{v}_x = \frac{1}{M_L}\left(F_x - \texttt{Drag} \right) + r\cdot v_y\\
+		\dot{v}_y = \frac{1}{m}\left(F_{yf}\cdot \cos\left(\delta \right) + F_{yr} \right) - r\cdot v_x\\
+		\dot{r} = \frac{1}{I_{tot}} \left(F_{yf}\cdot\cos\left(\delta \right)\cdot L_f - F_{yr}\cdot L_r + M_{TV} \right)
+	\end{matrix} \right. & y&=\left\{\begin{matrix}
+		w\\ \mu \\ v_x\\ v_y\\ r
+	\end{matrix}\right. & u&=\left\{\begin{matrix}
+		DC\\ \delta
+	\end{matrix} \right.
+\end{align*}
+
+There are a few nested functions that we can define below :
+\begin{equation}
+	\texttt{Drag} = F_{yf}\cdot\sin\left(\delta \right) + C_{drag}\cdot v_x^2 + \texttt{Car.DT.Friction}\cdot\arctan\left(v_x \right)
+\end{equation}
+\begin{equation}
+	F_x = 2.06\cdot 9.81\cdot\left(m + \texttt{Car.DT.Theta} \right)\cdot DC
+\end{equation}
+\vspace*{-2em}
+\begin{align}
+	\alpha_f &= \arctan\left(\frac{v_y + L_f\cdot r}{v_x} \right) - \delta & \alpha_r &= \arctan\left(\frac{v_y - L_r\cdot r}{v_x} \right)
+\end{align}
+\begin{equation}
+	\mu_y\left(\alpha_i \right) = D\cdot \sin\left\{C\cdot \arctan\left[B\cdot \left(1-E \right)\cdot\alpha_i + E\cdot\arctan\left(B\cdot\alpha_i \right) \right] \right\}\qquad\text{where $i$ is $f$ or $r$}
+\end{equation}
+\vspace*{-1em}
+\begin{align}
+	F_{zf} &= \left(m\cdot g + C_{down}\cdot v_x^2 \right)\cdot W_f & F_{zr} &= \left(m\cdot g + C_{down}\cdot v_x^2 \right)\cdot W_r
+\end{align}
+\vspace*{-1em}
+\begin{align}
+	F_{yf} &= F_{zf}\cdot \mu_y\left(\alpha_f \right) & F_{yr} &= F_{zr}\cdot \mu_y\left(\alpha_r \right)
+\end{align}
+
+Now that we want to calculate the state space matrices of our system at certain time zones, let us start by showing their formulation.
+\begin{align*}
+	A &= \begin{pmatrix}[1.3]
+		\frac{\partial \dot{w}}{\partial w} & \frac{\partial \dot{w}}{\partial \mu} & \frac{\partial \dot{w}}{\partial v_x} & \frac{\partial \dot{w}}{\partial v_y} & \frac{\partial \dot{w}}{\partial r}\\
+		\frac{\partial \dot{\mu}}{\partial w} & \frac{\partial \dot{\mu}}{\partial \mu} & \frac{\partial \dot{\mu}}{\partial v_x} & \frac{\partial \dot{\mu}}{\partial v_y} & \frac{\partial \dot{\mu}}{\partial r}\\
+		\frac{\partial \dot{v}_x}{\partial w} & \frac{\partial \dot{v}_x}{\partial \mu} & \frac{\partial \dot{v}_x}{\partial v_x} & \frac{\partial \dot{v}_x}{\partial v_y} & \frac{\partial \dot{v}_x}{\partial r}\\
+		\frac{\partial \dot{v}_y}{\partial w} & \frac{\partial \dot{v}_y}{\partial \mu} & \frac{\partial \dot{v}_y}{\partial v_x} & \frac{\partial \dot{v}_y}{\partial v_y} & \frac{\partial \dot{v}_y}{\partial r}\\
+		\frac{\partial \dot{r}}{\partial w} & \frac{\partial \dot{r}}{\partial \mu} & \frac{\partial \dot{r}}{\partial v_x} & \frac{\partial \dot{r}}{\partial v_y} & \frac{\partial \dot{r}}{\partial r}
+	\end{pmatrix} & B &= \begin{pmatrix}[1.3]
+		\frac{\partial \dot{w}}{\partial DC} & \frac{\partial \dot{w}}{\partial \delta} \\
+		\frac{\partial \dot{\mu}}{\partial DC} & \frac{\partial \dot{\mu}}{\partial \delta} \\
+		\frac{\partial \dot{v}_x}{\partial DC} & \frac{\partial \dot{v}_x}{\partial \delta} \\
+		\frac{\partial \dot{v}_y}{\partial DC} & \frac{\partial \dot{v}_y}{\partial \delta} \\
+		\frac{\partial \dot{r}}{\partial DC} & \frac{\partial \dot{r}}{\partial \delta} \\
+	\end{pmatrix} & C &= I_5 & D &= 0
+\end{align*}
+
+Obviously, the most complex matrix to calculate will be the $A$ and then $B$. We have developed the equations for each element of $A$ below :
+\begin{adjustwidth}{1cm}{}
+	\begin{align*}
+		\frac{\partial \dot{w}}{\partial w} &= 0\\
+		\frac{\partial \dot{w}}{\partial \mu} &= v_x \cdot\cos\left(\mu \right) - v_y \cdot\sin\left(\mu \right) \\
+		\frac{\partial \dot{w}}{\partial v_x} &= \sin\left(\mu \right) \\
+		\frac{\partial \dot{w}}{\partial v_y} &= \cos\left(\mu \right) \\
+		\frac{\partial \dot{w}}{\partial r} &= 0
+	\end{align*}
+	\begin{align*}
+		\frac{\partial \dot{\mu}}{\partial w} &= \frac{-\kappa^2\cdot (v_x\cdot \cos(\mu) - v_y\cdot \sin(\mu))}{(\kappa\cdot w - 1)^2} \\
+		\frac{\partial \dot{\mu}}{\partial \mu} &= \frac{-\kappa\cdot(v_y\cdot \cos(\mu) + v_x\cdot \sin(\mu))}{\kappa\cdot w - 1} \\
+		\frac{\partial \dot{\mu}}{\partial v_x} &= \frac{\cos(\mu)\cdot \kappa}{\kappa\cdot w - 1} \\
+		\frac{\partial \dot{\mu}}{\partial v_y} &= \frac{\sin(\mu)\cdot \kappa}{1-\kappa\cdot w} \\
+		\frac{\partial \dot{\mu}}{\partial r} &= 1
+	\end{align*}
+	\begin{align*}
+		\frac{\partial \dot{v}_x}{\partial w} &= 0\\
+		\frac{\partial \dot{v}_x}{\partial \mu} &= 0\\
+		\frac{\partial \dot{v}_x}{\partial v_x} &= \text{(function too long to write, see Matlab code for details)}\\
+		\frac{\partial \dot{v}_x}{\partial v_y} &= \text{(function too long to write, see Matlab code for details)}\\
+		\frac{\partial \dot{v}_x}{\partial r} &= \text{(function too long to write, see Matlab code for details)}
+	\end{align*}
+	\begin{align*}
+		\frac{\partial \dot{v}_y}{\partial w} &= 0\\
+		\frac{\partial \dot{v}_y}{\partial \mu} &= 0\\
+		\frac{\partial \dot{v}_y}{\partial v_x} &= \text{(function too long to write, see Matlab code for details)}\\
+		\frac{\partial \dot{v}_y}{\partial v_y} &= \text{(function too long to write, see Matlab code for details)}\\
+		\frac{\partial \dot{v}_y}{\partial r} &= \text{(function too long to write, see Matlab code for details)}
+	\end{align*}
+	\begin{align*}
+		\frac{\partial \dot{r}}{\partial w} &= 0\\
+		\frac{\partial \dot{r}}{\partial \mu} &= 0\\
+		\frac{\partial \dot{r}}{\partial v_x} &= \text{(function too long to write, see Matlab code for details)}\\
+		\frac{\partial \dot{r}}{\partial v_y} &= \text{(function too long to write, see Matlab code for details)}\\
+		\frac{\partial \dot{r}}{\partial r} &= \text{(function too long to write, see Matlab code for details)}
+	\end{align*}
+\end{adjustwidth}
+
+We have then done the same for the matrix $B$ :
+\begin{adjustwidth}{1cm}{}
+	\begin{align*}
+		\frac{\partial \dot{w}}{\partial DC} &= 0\\
+		\frac{\partial \dot{w}}{\partial \delta} &= 0
+	\end{align*}
+	\begin{align*}
+		\frac{\partial \dot{\mu}}{\partial DC} &= 0\\
+		\frac{\partial \dot{\mu}}{\partial \delta} &= 0 
+	\end{align*}
+	\begin{align*}
+		\frac{\partial \dot{v}_x}{\partial DC} &= \frac{2*20.2086\cdot m}{\texttt{Car.DT.Theta} + m} \\
+		\frac{\partial \dot{v}_x}{\partial \delta} &= \text{(function too long to write, see Matlab code for details)}
+	\end{align*}
+	\begin{align*}
+		\frac{\partial \dot{v}_y}{\partial DC} &= 0\\
+		\frac{\partial \dot{v}_y}{\partial \delta} &= \text{(function too long to write, see Matlab code for details)}
+	\end{align*}
+	\begin{align*}
+		\frac{\partial \dot{r}}{\partial DC} &= 0\\
+		\frac{\partial \dot{r}}{\partial \delta} &= \text{(function too long to write, see Matlab code for details)}
+	\end{align*}
+\end{adjustwidth}
+\vspace*{1em}
+Having the direct explicit equations in our code instead of making the algorithm calculate increases its efficiency by a substantial margin, along with decreasing its dependancy on other work packages in order to function. These calculations have been implemented within the function \texttt{LQR\_Opt}. Now that we have the expressions for these matrices, we can easily calculate them in our code.\\
+
+\section{Discretising the System}
+The next step is to discretise the response of our state space system with a sampling time of $T_S$. In our algorithm, we choose to do a \enquote{zero-order hold} discretisation. Our algorithm will therefore output new matrices $A'$ and $B'$. These two matrices can be calculated by doing the following :
+\begin{equation}
+	A' = \exp\left(A\cdot T_S \right)
+\end{equation}
+\begin{equation}
+	B' = \int_0^{T_S} \exp\left(A\cdot \tau \right) d\tau\cdot B = \frac{e^{A\cdot T_S} - 1}{A}\cdot B
+\end{equation}
+
+\section{Making the Final State Space System}
+Finally, we can make the final state space system with the matrices $\hat{A}$, $\hat{B}$, $\hat{C}$ and $\hat{D}$. These matrices are simply compositions of the matrices $A$, $B$, $C$ and $D$ that we previously calculated :
+\begin{align*}
+	\hat{A} &= \begin{pmatrix}
+		A' & B'\\
+		0 & I_2
+	\end{pmatrix} & \hat{B} &= \begin{pmatrix}
+		B'\\
+		I_2
+	\end{pmatrix} & \hat{C} &= \begin{pmatrix}
+		C & I_2
+	\end{pmatrix} & \hat{D} &= D
+\end{align*}
+
+\section{Calculating the Gain Matrix of our LQR Controller}
+
+Now that we have the matrices $\hat{A}$, $\hat{B}$, $\hat{C}$ and $\hat{D}$, we can move on to finding the gain matrix of our LQR controller. In our algorithm we solve for three different gain matrices, and then later on choose which to use. In order to calculate the gain matrix $K_i$, we will have to solve the Riccati equation. The matrices $Q$ and $R$ will be provided.\\
+
+In our algorithm, we want to solve the continuous algebraic Riccati equation (CARE), whose equation is :
+\begin{equation*}
+	A^T X + XA - XBR^{-1}B^T X + Q = 0
+\end{equation*}
+And the control matrix is : $K = -R^{-1}B^T X$. \\
+
+It is possible to find the solution to this by finding the eigen-decomposition of a larger system. We define the Hamiltonian matrix :
+\begin{equation*}
+	Z = \begin{pmatrix}
+		A & -BR^{-1}B^T\\
+		-Q & -A^T
+	\end{pmatrix}
+
+Our solution $X$ can then be calculated :
+\begin{equation*}
+	X = U_2 U_1^{-1}
+\end{equation*}
+
+\subsection{Gain Matrix $K_1$}
+
+
+
+\subsection{Gain Matrix $K_2$}
+
+
+
+\subsection{Gain Matrix $K_3$}
+
+\end{document}
